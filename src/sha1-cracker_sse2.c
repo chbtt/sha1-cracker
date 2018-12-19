@@ -12,7 +12,7 @@
  * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License 
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 #include "sha1-cracker.h"
 // SSE2 intrinsics
@@ -35,8 +35,13 @@
 #define SHA1_IV_3            UINT32_C(0x10325476)
 #define SHA1_IV_4            UINT32_C(0xC3D2E1F0)
 // length of preimage (always 6 bytes)
-#define PREIMAGE_LENGTH_BYTE                   6
-#define PREIMAGE_LENGTH_BIT  UINT32_C(0x00000030)
+#define PREIMAGE_LENGTH_BYTE                          6
+#define PREIMAGE_LENGTH_BIT         UINT32_C(0x00000030)
+#define PREIMAGE_LENGTH_BIT_LROT1   UINT32_C(0x00000060)
+#define PREIMAGE_LENGTH_BIT_LROT2   UINT32_C(0x000000C0)
+#define PREIMAGE_LENGTH_BIT_LROT3   UINT32_C(0x00000180)
+#define PREIMAGE_LENGTH_BIT_LROT4   UINT32_C(0x00000300)
+#define PREIMAGE_LENGTH_BIT_LROT5   UINT32_C(0x00000600)
 
 // macros for f-functions
 #define VF_00_19(mB, mC, mD) (XOR(mD, (AND(mB, (XOR(mC, mD))))))
@@ -77,9 +82,8 @@
     ROUND_PROCESSING_END(mA, mB, mE, VF_REST(mB, mC, mD), K_60_79, i)
 
 // function prototypes
-static inline void precomputeOuterLoop(uint32_t *p_tempPrecomputedBlocks,
-                                       __m128i  *p_precomputedBlocks);
-static inline void precomputeInnerLoop(__m128i  *p_precomputedBlocks,
+static inline void precomputeOuterLoop(__m128i  *p_vecPrecomputedBlocks);
+static inline void precomputeInnerLoop(__m128i  *p_vecPrecomputedBlocks,
                                        __m128i  *p_w0,
                                        __m128i  *p_blocks);
 
@@ -95,8 +99,7 @@ int crackHash
     int      index;
     __m128i  a, b, c, d, e, vecTemp;
     char     p_currInput[6];
-    uint32_t p_tempPrecomputedBlocks[80],
-             p_earlyExit[5],
+    uint32_t p_earlyExit[5],
              p_tempSave[4];
     __m128i  p_vecPrecomputedBlocks[80],
              p_w0[21],
@@ -113,22 +116,20 @@ int crackHash
                     ROUND_CONSTANT_04 = SET1INT(0xB453C259),
                     ROUND_CONSTANT_15 = SET1INT(0x5A8279C9);
     /*************** SET CORRECT PADDING ONCE ****************/
-    // 32-bit word array for precomputation in outer loop
-    p_tempPrecomputedBlocks[ 2] = 0u; p_tempPrecomputedBlocks[ 3] = 0u;
-    p_tempPrecomputedBlocks[ 4] = 0u; p_tempPrecomputedBlocks[ 5] = 0u;
-    p_tempPrecomputedBlocks[ 6] = 0u; p_tempPrecomputedBlocks[ 7] = 0u;
-    p_tempPrecomputedBlocks[ 8] = 0u; p_tempPrecomputedBlocks[ 9] = 0u;
-    p_tempPrecomputedBlocks[10] = 0u; p_tempPrecomputedBlocks[11] = 0u;
-    p_tempPrecomputedBlocks[12] = 0u; p_tempPrecomputedBlocks[13] = 0u;
-    p_tempPrecomputedBlocks[14] = 0u; p_tempPrecomputedBlocks[15] = PREIMAGE_LENGTH_BIT;
-    // __m128i array to hold values from precomputation in outer loop for easy use
-    p_vecPrecomputedBlocks[ 2]  = SETZERO; p_vecPrecomputedBlocks[ 3]  = SETZERO;
-    p_vecPrecomputedBlocks[ 4]  = SETZERO; p_vecPrecomputedBlocks[ 5]  = SETZERO;
-    p_vecPrecomputedBlocks[ 6]  = SETZERO; p_vecPrecomputedBlocks[ 7]  = SETZERO;
-    p_vecPrecomputedBlocks[ 8]  = SETZERO; p_vecPrecomputedBlocks[ 9]  = SETZERO;
-    p_vecPrecomputedBlocks[10]  = SETZERO; p_vecPrecomputedBlocks[11]  = SETZERO;
-    p_vecPrecomputedBlocks[12]  = SETZERO; p_vecPrecomputedBlocks[13]  = SETZERO;
-    p_vecPrecomputedBlocks[14]  = SETZERO; p_vecPrecomputedBlocks[15]  = SET1INT(PREIMAGE_LENGTH_BIT);
+    p_vecPrecomputedBlocks[ 2] = SETZERO; p_vecPrecomputedBlocks[ 3] = SETZERO;
+    p_vecPrecomputedBlocks[ 4] = SETZERO; p_vecPrecomputedBlocks[ 5] = SETZERO;
+    p_vecPrecomputedBlocks[ 6] = SETZERO; p_vecPrecomputedBlocks[ 7] = SETZERO;
+    p_vecPrecomputedBlocks[ 8] = SETZERO; p_vecPrecomputedBlocks[ 9] = SETZERO;
+    p_vecPrecomputedBlocks[10] = SETZERO; p_vecPrecomputedBlocks[11] = SETZERO;
+    p_vecPrecomputedBlocks[12] = SETZERO; p_vecPrecomputedBlocks[13] = SETZERO;
+    p_vecPrecomputedBlocks[14] = SETZERO;
+    p_vecPrecomputedBlocks[15] = SET1INT(PREIMAGE_LENGTH_BIT);
+    // the following values are only dependent on the preimage length
+    p_vecPrecomputedBlocks[18] = SET1INT(PREIMAGE_LENGTH_BIT_LROT1);
+    p_vecPrecomputedBlocks[21] = SET1INT(PREIMAGE_LENGTH_BIT_LROT2);
+    p_vecPrecomputedBlocks[24] = SET1INT(PREIMAGE_LENGTH_BIT_LROT3);
+    p_vecPrecomputedBlocks[27] = SET1INT(PREIMAGE_LENGTH_BIT_LROT4);
+    p_vecPrecomputedBlocks[30] = SET1INT(PREIMAGE_LENGTH_BIT_LROT5);
     // initialize p_blocks with padding too
     memcpy( p_blocks,
             p_vecPrecomputedBlocks,
@@ -150,14 +151,12 @@ int crackHash
         for (p_currInput[5] = 'a'; p_currInput[5] <= 'z'; p_currInput[5]++)
         {
             // set second word block based on input ('1'-bit == 0x8000)
-            p_tempPrecomputedBlocks[1] = UINT32_C(0x8000)
-                                       | (p_currInput[4] << 24)
-                                       | (p_currInput[5] << 16);
-            p_vecPrecomputedBlocks[1] = SET1INT(p_tempPrecomputedBlocks[1]);
+            p_vecPrecomputedBlocks[1] = SET1INT(  UINT32_C(0x8000)
+                                                | (p_currInput[4] << 24)
+                                                | (p_currInput[5] << 16));
             p_blocks[1] = p_vecPrecomputedBlocks[1];
             // precompute word blocks for outer loop
-            precomputeOuterLoop(p_tempPrecomputedBlocks,
-                                p_vecPrecomputedBlocks);
+            precomputeOuterLoop(p_vecPrecomputedBlocks);
             // inner loop through all four letter combinations from 'a' to 'z'
             for (p_currInput[0] = 'a'; p_currInput[0] <= 'z'; p_currInput[0]++)
                 for (p_currInput[1] = 'a'; p_currInput[1] <= 'z'; p_currInput[1]++)
@@ -365,210 +364,142 @@ success:
  */
 static inline void precomputeOuterLoop
 (
-    uint32_t *p_tempPrecomputedBlocks,
-    __m128i  *p_precomputedBlocks
+    __m128i  *p_vecPrecomputedBlocks
 )
 {
-    // compute values once instead of computing the same four values every time with SSE2
-    //p_tempPrecomputedBlocks[16] = 0;
-    p_tempPrecomputedBlocks[17] = p_tempPrecomputedBlocks[1];
-    p_tempPrecomputedBlocks[17] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[17], 1);
-    p_tempPrecomputedBlocks[18] = p_tempPrecomputedBlocks[15];
-    p_tempPrecomputedBlocks[18] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[18], 1);
-    //p_tempPrecomputedBlocks[19] = 0;
-    p_tempPrecomputedBlocks[20] = p_tempPrecomputedBlocks[17];
-    p_tempPrecomputedBlocks[20] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[20], 1);
-    p_tempPrecomputedBlocks[21] = p_tempPrecomputedBlocks[18];
-    p_tempPrecomputedBlocks[21] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[21], 1);
-    //p_tempPrecomputedBlocks[22] = 0;
-    p_tempPrecomputedBlocks[23] = p_tempPrecomputedBlocks[20] ^ p_tempPrecomputedBlocks[15];
-    p_tempPrecomputedBlocks[23] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[23], 1);
-    p_tempPrecomputedBlocks[24] = p_tempPrecomputedBlocks[21];
-    p_tempPrecomputedBlocks[24] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[24], 1);
-    p_tempPrecomputedBlocks[25] = p_tempPrecomputedBlocks[17];
-    p_tempPrecomputedBlocks[25] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[25], 1);
-    p_tempPrecomputedBlocks[26] = p_tempPrecomputedBlocks[23] ^ p_tempPrecomputedBlocks[18];
-    p_tempPrecomputedBlocks[26] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[26], 1);
-    p_tempPrecomputedBlocks[27] = p_tempPrecomputedBlocks[24];
-    p_tempPrecomputedBlocks[27] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[27], 1);
-    p_tempPrecomputedBlocks[28] = p_tempPrecomputedBlocks[25] ^ p_tempPrecomputedBlocks[20];
-    p_tempPrecomputedBlocks[28] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[28], 1);
-    p_tempPrecomputedBlocks[29] = p_tempPrecomputedBlocks[26] ^ p_tempPrecomputedBlocks[21] ^ p_tempPrecomputedBlocks[15];
-    p_tempPrecomputedBlocks[29] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[29], 1);
-    p_tempPrecomputedBlocks[30] = p_tempPrecomputedBlocks[27];
-    p_tempPrecomputedBlocks[30] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[30], 1);
-    p_tempPrecomputedBlocks[31] = p_tempPrecomputedBlocks[28] ^ p_tempPrecomputedBlocks[23] ^ p_tempPrecomputedBlocks[17] ^ p_tempPrecomputedBlocks[15];
-    p_tempPrecomputedBlocks[31] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[31], 1);
-    p_tempPrecomputedBlocks[32] = p_tempPrecomputedBlocks[29] ^ p_tempPrecomputedBlocks[24] ^ p_tempPrecomputedBlocks[18];
-    p_tempPrecomputedBlocks[32] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[32], 1);
-    p_tempPrecomputedBlocks[33] = p_tempPrecomputedBlocks[30] ^ p_tempPrecomputedBlocks[25] ^ p_tempPrecomputedBlocks[17];
-    p_tempPrecomputedBlocks[33] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[33], 1);
-    p_tempPrecomputedBlocks[34] = p_tempPrecomputedBlocks[31] ^ p_tempPrecomputedBlocks[26] ^ p_tempPrecomputedBlocks[20] ^ p_tempPrecomputedBlocks[18];
-    p_tempPrecomputedBlocks[34] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[34], 1);
-    p_tempPrecomputedBlocks[35] = p_tempPrecomputedBlocks[32] ^ p_tempPrecomputedBlocks[27] ^ p_tempPrecomputedBlocks[21];
-    p_tempPrecomputedBlocks[35] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[35], 1);
-    p_tempPrecomputedBlocks[36] = p_tempPrecomputedBlocks[33] ^ p_tempPrecomputedBlocks[28] ^ p_tempPrecomputedBlocks[20];
-    p_tempPrecomputedBlocks[36] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[36], 1);
-    p_tempPrecomputedBlocks[37] = p_tempPrecomputedBlocks[34] ^ p_tempPrecomputedBlocks[29] ^ p_tempPrecomputedBlocks[23] ^ p_tempPrecomputedBlocks[21];
-    p_tempPrecomputedBlocks[37] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[37], 1);
-    p_tempPrecomputedBlocks[38] = p_tempPrecomputedBlocks[35] ^ p_tempPrecomputedBlocks[30] ^ p_tempPrecomputedBlocks[24];
-    p_tempPrecomputedBlocks[38] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[38], 1);
-    p_tempPrecomputedBlocks[39] = p_tempPrecomputedBlocks[36] ^ p_tempPrecomputedBlocks[31] ^ p_tempPrecomputedBlocks[25] ^ p_tempPrecomputedBlocks[23];
-    p_tempPrecomputedBlocks[39] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[39], 1);
-    p_tempPrecomputedBlocks[40] = p_tempPrecomputedBlocks[37] ^ p_tempPrecomputedBlocks[32] ^ p_tempPrecomputedBlocks[26] ^ p_tempPrecomputedBlocks[24];
-    p_tempPrecomputedBlocks[40] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[40], 1);
-    p_tempPrecomputedBlocks[41] = p_tempPrecomputedBlocks[38] ^ p_tempPrecomputedBlocks[33] ^ p_tempPrecomputedBlocks[27] ^ p_tempPrecomputedBlocks[25];
-    p_tempPrecomputedBlocks[41] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[41], 1);
-    p_tempPrecomputedBlocks[42] = p_tempPrecomputedBlocks[39] ^ p_tempPrecomputedBlocks[34] ^ p_tempPrecomputedBlocks[28] ^ p_tempPrecomputedBlocks[26];
-    p_tempPrecomputedBlocks[42] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[42], 1);
-    p_tempPrecomputedBlocks[43] = p_tempPrecomputedBlocks[40] ^ p_tempPrecomputedBlocks[35] ^ p_tempPrecomputedBlocks[29] ^ p_tempPrecomputedBlocks[27];
-    p_tempPrecomputedBlocks[43] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[43], 1);
-    p_tempPrecomputedBlocks[44] = p_tempPrecomputedBlocks[41] ^ p_tempPrecomputedBlocks[36] ^ p_tempPrecomputedBlocks[30] ^ p_tempPrecomputedBlocks[28];
-    p_tempPrecomputedBlocks[44] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[44], 1);
-    p_tempPrecomputedBlocks[45] = p_tempPrecomputedBlocks[42] ^ p_tempPrecomputedBlocks[37] ^ p_tempPrecomputedBlocks[31] ^ p_tempPrecomputedBlocks[29];
-    p_tempPrecomputedBlocks[45] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[45], 1);
-    p_tempPrecomputedBlocks[46] = p_tempPrecomputedBlocks[43] ^ p_tempPrecomputedBlocks[38] ^ p_tempPrecomputedBlocks[32] ^ p_tempPrecomputedBlocks[30];
-    p_tempPrecomputedBlocks[46] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[46], 1);
-    p_tempPrecomputedBlocks[47] = p_tempPrecomputedBlocks[44] ^ p_tempPrecomputedBlocks[39] ^ p_tempPrecomputedBlocks[33] ^ p_tempPrecomputedBlocks[31];
-    p_tempPrecomputedBlocks[47] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[47], 1);
-    p_tempPrecomputedBlocks[48] = p_tempPrecomputedBlocks[45] ^ p_tempPrecomputedBlocks[40] ^ p_tempPrecomputedBlocks[34] ^ p_tempPrecomputedBlocks[32];
-    p_tempPrecomputedBlocks[48] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[48], 1);
-    p_tempPrecomputedBlocks[49] = p_tempPrecomputedBlocks[46] ^ p_tempPrecomputedBlocks[41] ^ p_tempPrecomputedBlocks[35] ^ p_tempPrecomputedBlocks[33];
-    p_tempPrecomputedBlocks[49] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[49], 1);
-    p_tempPrecomputedBlocks[50] = p_tempPrecomputedBlocks[47] ^ p_tempPrecomputedBlocks[42] ^ p_tempPrecomputedBlocks[36] ^ p_tempPrecomputedBlocks[34];
-    p_tempPrecomputedBlocks[50] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[50], 1);
-    p_tempPrecomputedBlocks[51] = p_tempPrecomputedBlocks[48] ^ p_tempPrecomputedBlocks[43] ^ p_tempPrecomputedBlocks[37] ^ p_tempPrecomputedBlocks[35];
-    p_tempPrecomputedBlocks[51] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[51], 1);
-    p_tempPrecomputedBlocks[52] = p_tempPrecomputedBlocks[49] ^ p_tempPrecomputedBlocks[44] ^ p_tempPrecomputedBlocks[38] ^ p_tempPrecomputedBlocks[36];
-    p_tempPrecomputedBlocks[52] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[52], 1);
-    p_tempPrecomputedBlocks[53] = p_tempPrecomputedBlocks[50] ^ p_tempPrecomputedBlocks[45] ^ p_tempPrecomputedBlocks[39] ^ p_tempPrecomputedBlocks[37];
-    p_tempPrecomputedBlocks[53] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[53], 1);
-    p_tempPrecomputedBlocks[54] = p_tempPrecomputedBlocks[51] ^ p_tempPrecomputedBlocks[46] ^ p_tempPrecomputedBlocks[40] ^ p_tempPrecomputedBlocks[38];
-    p_tempPrecomputedBlocks[54] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[54], 1);
-    p_tempPrecomputedBlocks[55] = p_tempPrecomputedBlocks[52] ^ p_tempPrecomputedBlocks[47] ^ p_tempPrecomputedBlocks[41] ^ p_tempPrecomputedBlocks[39];
-    p_tempPrecomputedBlocks[55] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[55], 1);
-    p_tempPrecomputedBlocks[56] = p_tempPrecomputedBlocks[53] ^ p_tempPrecomputedBlocks[48] ^ p_tempPrecomputedBlocks[42] ^ p_tempPrecomputedBlocks[40];
-    p_tempPrecomputedBlocks[56] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[56], 1);
-    p_tempPrecomputedBlocks[57] = p_tempPrecomputedBlocks[54] ^ p_tempPrecomputedBlocks[49] ^ p_tempPrecomputedBlocks[43] ^ p_tempPrecomputedBlocks[41];
-    p_tempPrecomputedBlocks[57] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[57], 1);
-    p_tempPrecomputedBlocks[58] = p_tempPrecomputedBlocks[55] ^ p_tempPrecomputedBlocks[50] ^ p_tempPrecomputedBlocks[44] ^ p_tempPrecomputedBlocks[42];
-    p_tempPrecomputedBlocks[58] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[58], 1);
-    p_tempPrecomputedBlocks[59] = p_tempPrecomputedBlocks[56] ^ p_tempPrecomputedBlocks[51] ^ p_tempPrecomputedBlocks[45] ^ p_tempPrecomputedBlocks[43];
-    p_tempPrecomputedBlocks[59] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[59], 1);
-    p_tempPrecomputedBlocks[60] = p_tempPrecomputedBlocks[57] ^ p_tempPrecomputedBlocks[52] ^ p_tempPrecomputedBlocks[46] ^ p_tempPrecomputedBlocks[44];
-    p_tempPrecomputedBlocks[60] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[60], 1);
-    p_tempPrecomputedBlocks[61] = p_tempPrecomputedBlocks[58] ^ p_tempPrecomputedBlocks[53] ^ p_tempPrecomputedBlocks[47] ^ p_tempPrecomputedBlocks[45];
-    p_tempPrecomputedBlocks[61] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[61], 1);
-    p_tempPrecomputedBlocks[62] = p_tempPrecomputedBlocks[59] ^ p_tempPrecomputedBlocks[54] ^ p_tempPrecomputedBlocks[48] ^ p_tempPrecomputedBlocks[46];
-    p_tempPrecomputedBlocks[62] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[62], 1);
-    p_tempPrecomputedBlocks[63] = p_tempPrecomputedBlocks[60] ^ p_tempPrecomputedBlocks[55] ^ p_tempPrecomputedBlocks[49] ^ p_tempPrecomputedBlocks[47];
-    p_tempPrecomputedBlocks[63] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[63], 1);
-    p_tempPrecomputedBlocks[64] = p_tempPrecomputedBlocks[61] ^ p_tempPrecomputedBlocks[56] ^ p_tempPrecomputedBlocks[50] ^ p_tempPrecomputedBlocks[48];
-    p_tempPrecomputedBlocks[64] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[64], 1);
-    p_tempPrecomputedBlocks[65] = p_tempPrecomputedBlocks[62] ^ p_tempPrecomputedBlocks[57] ^ p_tempPrecomputedBlocks[51] ^ p_tempPrecomputedBlocks[49];
-    p_tempPrecomputedBlocks[65] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[65], 1);
-    p_tempPrecomputedBlocks[66] = p_tempPrecomputedBlocks[63] ^ p_tempPrecomputedBlocks[58] ^ p_tempPrecomputedBlocks[52] ^ p_tempPrecomputedBlocks[50];
-    p_tempPrecomputedBlocks[66] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[66], 1);
-    p_tempPrecomputedBlocks[67] = p_tempPrecomputedBlocks[64] ^ p_tempPrecomputedBlocks[59] ^ p_tempPrecomputedBlocks[53] ^ p_tempPrecomputedBlocks[51];
-    p_tempPrecomputedBlocks[67] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[67], 1);
-    p_tempPrecomputedBlocks[68] = p_tempPrecomputedBlocks[65] ^ p_tempPrecomputedBlocks[60] ^ p_tempPrecomputedBlocks[54] ^ p_tempPrecomputedBlocks[52];
-    p_tempPrecomputedBlocks[68] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[68], 1);
-    p_tempPrecomputedBlocks[69] = p_tempPrecomputedBlocks[66] ^ p_tempPrecomputedBlocks[61] ^ p_tempPrecomputedBlocks[55] ^ p_tempPrecomputedBlocks[53];
-    p_tempPrecomputedBlocks[69] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[69], 1);
-    p_tempPrecomputedBlocks[70] = p_tempPrecomputedBlocks[67] ^ p_tempPrecomputedBlocks[62] ^ p_tempPrecomputedBlocks[56] ^ p_tempPrecomputedBlocks[54];
-    p_tempPrecomputedBlocks[70] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[70], 1);
-    p_tempPrecomputedBlocks[71] = p_tempPrecomputedBlocks[68] ^ p_tempPrecomputedBlocks[63] ^ p_tempPrecomputedBlocks[57] ^ p_tempPrecomputedBlocks[55];
-    p_tempPrecomputedBlocks[71] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[71], 1);
-    p_tempPrecomputedBlocks[72] = p_tempPrecomputedBlocks[69] ^ p_tempPrecomputedBlocks[64] ^ p_tempPrecomputedBlocks[58] ^ p_tempPrecomputedBlocks[56];
-    p_tempPrecomputedBlocks[72] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[72], 1);
-    p_tempPrecomputedBlocks[73] = p_tempPrecomputedBlocks[70] ^ p_tempPrecomputedBlocks[65] ^ p_tempPrecomputedBlocks[59] ^ p_tempPrecomputedBlocks[57];
-    p_tempPrecomputedBlocks[73] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[73], 1);
-    p_tempPrecomputedBlocks[74] = p_tempPrecomputedBlocks[71] ^ p_tempPrecomputedBlocks[66] ^ p_tempPrecomputedBlocks[60] ^ p_tempPrecomputedBlocks[58];
-    p_tempPrecomputedBlocks[74] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[74], 1);
-    p_tempPrecomputedBlocks[75] = p_tempPrecomputedBlocks[72] ^ p_tempPrecomputedBlocks[67] ^ p_tempPrecomputedBlocks[61] ^ p_tempPrecomputedBlocks[59];
-    p_tempPrecomputedBlocks[75] = U32_LEFT_ROTATE(p_tempPrecomputedBlocks[75], 1);
-    // assign computed values to vector (this will most likely be optimized away by gcc)
-    //p_precomputedBlocks[16] = SET1INT(p_tempPrecomputedBlocks[16]);
-    p_precomputedBlocks[17] = SET1INT(p_tempPrecomputedBlocks[17]);
-    p_precomputedBlocks[18] = SET1INT(p_tempPrecomputedBlocks[18]);
-    //p_precomputedBlocks[19] = SET1INT(p_tempPrecomputedBlocks[19]);
-    p_precomputedBlocks[20] = SET1INT(p_tempPrecomputedBlocks[20]);
-    p_precomputedBlocks[21] = SET1INT(p_tempPrecomputedBlocks[21]);
-    //p_precomputedBlocks[22] = SET1INT(p_tempPrecomputedBlocks[22]);
-    p_precomputedBlocks[23] = SET1INT(p_tempPrecomputedBlocks[23]);
-    p_precomputedBlocks[24] = SET1INT(p_tempPrecomputedBlocks[24]);
-    p_precomputedBlocks[25] = SET1INT(p_tempPrecomputedBlocks[25]);
-    p_precomputedBlocks[26] = SET1INT(p_tempPrecomputedBlocks[26]);
-    p_precomputedBlocks[27] = SET1INT(p_tempPrecomputedBlocks[27]);
-    p_precomputedBlocks[28] = SET1INT(p_tempPrecomputedBlocks[28]);
-    p_precomputedBlocks[29] = SET1INT(p_tempPrecomputedBlocks[29]);
-    p_precomputedBlocks[30] = SET1INT(p_tempPrecomputedBlocks[30]);
-    p_precomputedBlocks[31] = SET1INT(p_tempPrecomputedBlocks[31]);
-    p_precomputedBlocks[32] = SET1INT(p_tempPrecomputedBlocks[32]);
-    p_precomputedBlocks[33] = SET1INT(p_tempPrecomputedBlocks[33]);
-    p_precomputedBlocks[34] = SET1INT(p_tempPrecomputedBlocks[34]);
-    p_precomputedBlocks[35] = SET1INT(p_tempPrecomputedBlocks[35]);
-    p_precomputedBlocks[36] = SET1INT(p_tempPrecomputedBlocks[36]);
-    p_precomputedBlocks[37] = SET1INT(p_tempPrecomputedBlocks[37]);
-    p_precomputedBlocks[38] = SET1INT(p_tempPrecomputedBlocks[38]);
-    p_precomputedBlocks[39] = SET1INT(p_tempPrecomputedBlocks[39]);
-    p_precomputedBlocks[40] = SET1INT(p_tempPrecomputedBlocks[40]);
-    p_precomputedBlocks[41] = SET1INT(p_tempPrecomputedBlocks[41]);
-    p_precomputedBlocks[42] = SET1INT(p_tempPrecomputedBlocks[42]);
-    p_precomputedBlocks[43] = SET1INT(p_tempPrecomputedBlocks[43]);
-    p_precomputedBlocks[44] = SET1INT(p_tempPrecomputedBlocks[44]);
-    p_precomputedBlocks[45] = SET1INT(p_tempPrecomputedBlocks[45]);
-    p_precomputedBlocks[46] = SET1INT(p_tempPrecomputedBlocks[46]);
-    p_precomputedBlocks[47] = SET1INT(p_tempPrecomputedBlocks[47]);
-    p_precomputedBlocks[48] = SET1INT(p_tempPrecomputedBlocks[48]);
-    p_precomputedBlocks[49] = SET1INT(p_tempPrecomputedBlocks[49]);
-    p_precomputedBlocks[50] = SET1INT(p_tempPrecomputedBlocks[50]);
-    p_precomputedBlocks[51] = SET1INT(p_tempPrecomputedBlocks[51]);
-    p_precomputedBlocks[52] = SET1INT(p_tempPrecomputedBlocks[52]);
-    p_precomputedBlocks[53] = SET1INT(p_tempPrecomputedBlocks[53]);
-    p_precomputedBlocks[54] = SET1INT(p_tempPrecomputedBlocks[54]);
-    p_precomputedBlocks[55] = SET1INT(p_tempPrecomputedBlocks[55]);
-    p_precomputedBlocks[56] = SET1INT(p_tempPrecomputedBlocks[56]);
-    p_precomputedBlocks[57] = SET1INT(p_tempPrecomputedBlocks[57]);
-    p_precomputedBlocks[58] = SET1INT(p_tempPrecomputedBlocks[58]);
-    p_precomputedBlocks[59] = SET1INT(p_tempPrecomputedBlocks[59]);
-    p_precomputedBlocks[60] = SET1INT(p_tempPrecomputedBlocks[60]);
-    p_precomputedBlocks[61] = SET1INT(p_tempPrecomputedBlocks[61]);
-    p_precomputedBlocks[62] = SET1INT(p_tempPrecomputedBlocks[62]);
-    p_precomputedBlocks[63] = SET1INT(p_tempPrecomputedBlocks[63]);
-    p_precomputedBlocks[64] = SET1INT(p_tempPrecomputedBlocks[64]);
-    p_precomputedBlocks[65] = SET1INT(p_tempPrecomputedBlocks[65]);
-    p_precomputedBlocks[66] = SET1INT(p_tempPrecomputedBlocks[66]);
-    p_precomputedBlocks[67] = SET1INT(p_tempPrecomputedBlocks[67]);
-    p_precomputedBlocks[68] = SET1INT(p_tempPrecomputedBlocks[68]);
-    p_precomputedBlocks[69] = SET1INT(p_tempPrecomputedBlocks[69]);
-    p_precomputedBlocks[70] = SET1INT(p_tempPrecomputedBlocks[70]);
-    p_precomputedBlocks[71] = SET1INT(p_tempPrecomputedBlocks[71]);
-    p_precomputedBlocks[72] = SET1INT(p_tempPrecomputedBlocks[72]);
-    p_precomputedBlocks[73] = SET1INT(p_tempPrecomputedBlocks[73]);
-    p_precomputedBlocks[74] = SET1INT(p_tempPrecomputedBlocks[74]);
-    p_precomputedBlocks[75] = SET1INT(p_tempPrecomputedBlocks[75]);
+    //p_vecPrecomputedBlocks[16] = 0;
+    p_vecPrecomputedBlocks[17] = p_vecPrecomputedBlocks[1];
+    p_vecPrecomputedBlocks[17] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[17], 1);
+    //p_vecPrecomputedBlocks[18] = SET1INT(PREIMAGE_LENGTH_BIT_LROT1);
+    //p_vecPrecomputedBlocks[19] = 0;
+    p_vecPrecomputedBlocks[20] = p_vecPrecomputedBlocks[17];
+    p_vecPrecomputedBlocks[20] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[20], 1);
+    //p_vecPrecomputedBlocks[21] = SET1INT(PREIMAGE_LENGTH_BIT_LROT2);
+    //p_vecPrecomputedBlocks[22] = 0;
+    p_vecPrecomputedBlocks[23] = XOR(p_vecPrecomputedBlocks[20], p_vecPrecomputedBlocks[15]);
+    p_vecPrecomputedBlocks[23] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[23], 1);
+    //p_vecPrecomputedBlocks[24] = SET1INT(PREIMAGE_LENGTH_BIT_LROT3);
+    p_vecPrecomputedBlocks[25] = p_vecPrecomputedBlocks[17];
+    p_vecPrecomputedBlocks[25] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[25], 1);
+    p_vecPrecomputedBlocks[26] = XOR(p_vecPrecomputedBlocks[23], p_vecPrecomputedBlocks[18]);
+    p_vecPrecomputedBlocks[26] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[26], 1);
+    //p_vecPrecomputedBlocks[27] = SET1INT(PREIMAGE_LENGTH_BIT_LROT4);
+    p_vecPrecomputedBlocks[28] = XOR(p_vecPrecomputedBlocks[25], p_vecPrecomputedBlocks[20]);
+    p_vecPrecomputedBlocks[28] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[28], 1);
+    p_vecPrecomputedBlocks[29] = XOR(XOR(p_vecPrecomputedBlocks[26], p_vecPrecomputedBlocks[21]), p_vecPrecomputedBlocks[15]);
+    p_vecPrecomputedBlocks[29] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[29], 1);
+    //p_vecPrecomputedBlocks[30] = SET1INT(PREIMAGE_LENGTH_BIT_LROT5);
+    p_vecPrecomputedBlocks[31] = XOR(XOR(p_vecPrecomputedBlocks[28], p_vecPrecomputedBlocks[23]), XOR(p_vecPrecomputedBlocks[17], p_vecPrecomputedBlocks[15]));
+    p_vecPrecomputedBlocks[31] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[31], 1);
+    p_vecPrecomputedBlocks[32] = XOR(XOR(p_vecPrecomputedBlocks[29], p_vecPrecomputedBlocks[24]), p_vecPrecomputedBlocks[18]);
+    p_vecPrecomputedBlocks[32] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[32], 1);
+    p_vecPrecomputedBlocks[33] = XOR(XOR(p_vecPrecomputedBlocks[30], p_vecPrecomputedBlocks[25]), p_vecPrecomputedBlocks[17]);
+    p_vecPrecomputedBlocks[33] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[33], 1);
+    p_vecPrecomputedBlocks[34] = XOR(XOR(p_vecPrecomputedBlocks[31], p_vecPrecomputedBlocks[26]), XOR(p_vecPrecomputedBlocks[20], p_vecPrecomputedBlocks[18]));
+    p_vecPrecomputedBlocks[34] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[34], 1);
+    p_vecPrecomputedBlocks[35] = XOR(XOR(p_vecPrecomputedBlocks[32], p_vecPrecomputedBlocks[27]), p_vecPrecomputedBlocks[21]);
+    p_vecPrecomputedBlocks[35] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[35], 1);
+    p_vecPrecomputedBlocks[36] = XOR(XOR(p_vecPrecomputedBlocks[33], p_vecPrecomputedBlocks[28]), p_vecPrecomputedBlocks[20]);
+    p_vecPrecomputedBlocks[36] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[36], 1);
+    p_vecPrecomputedBlocks[37] = XOR(XOR(p_vecPrecomputedBlocks[34], p_vecPrecomputedBlocks[29]), XOR(p_vecPrecomputedBlocks[23], p_vecPrecomputedBlocks[21]));
+    p_vecPrecomputedBlocks[37] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[37], 1);
+    p_vecPrecomputedBlocks[38] = XOR(XOR(p_vecPrecomputedBlocks[35], p_vecPrecomputedBlocks[30]), p_vecPrecomputedBlocks[24]);
+    p_vecPrecomputedBlocks[38] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[38], 1);
+    p_vecPrecomputedBlocks[39] = XOR(XOR(p_vecPrecomputedBlocks[36], p_vecPrecomputedBlocks[31]), XOR(p_vecPrecomputedBlocks[25], p_vecPrecomputedBlocks[23]));
+    p_vecPrecomputedBlocks[39] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[39], 1);
+    p_vecPrecomputedBlocks[40] = XOR(XOR(p_vecPrecomputedBlocks[37], p_vecPrecomputedBlocks[32]), XOR(p_vecPrecomputedBlocks[26], p_vecPrecomputedBlocks[24]));
+    p_vecPrecomputedBlocks[40] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[40], 1);
+    p_vecPrecomputedBlocks[41] = XOR(XOR(p_vecPrecomputedBlocks[38], p_vecPrecomputedBlocks[33]), XOR(p_vecPrecomputedBlocks[27], p_vecPrecomputedBlocks[25]));
+    p_vecPrecomputedBlocks[41] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[41], 1);
+    p_vecPrecomputedBlocks[42] = XOR(XOR(p_vecPrecomputedBlocks[39], p_vecPrecomputedBlocks[34]), XOR(p_vecPrecomputedBlocks[28], p_vecPrecomputedBlocks[26]));
+    p_vecPrecomputedBlocks[42] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[42], 1);
+    p_vecPrecomputedBlocks[43] = XOR(XOR(p_vecPrecomputedBlocks[40], p_vecPrecomputedBlocks[35]), XOR(p_vecPrecomputedBlocks[29], p_vecPrecomputedBlocks[27]));
+    p_vecPrecomputedBlocks[43] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[43], 1);
+    p_vecPrecomputedBlocks[44] = XOR(XOR(p_vecPrecomputedBlocks[41], p_vecPrecomputedBlocks[36]), XOR(p_vecPrecomputedBlocks[30], p_vecPrecomputedBlocks[28]));
+    p_vecPrecomputedBlocks[44] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[44], 1);
+    p_vecPrecomputedBlocks[45] = XOR(XOR(p_vecPrecomputedBlocks[42], p_vecPrecomputedBlocks[37]), XOR(p_vecPrecomputedBlocks[31], p_vecPrecomputedBlocks[29]));
+    p_vecPrecomputedBlocks[45] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[45], 1);
+    p_vecPrecomputedBlocks[46] = XOR(XOR(p_vecPrecomputedBlocks[43], p_vecPrecomputedBlocks[38]), XOR(p_vecPrecomputedBlocks[32], p_vecPrecomputedBlocks[30]));
+    p_vecPrecomputedBlocks[46] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[46], 1);
+    p_vecPrecomputedBlocks[47] = XOR(XOR(p_vecPrecomputedBlocks[44], p_vecPrecomputedBlocks[39]), XOR(p_vecPrecomputedBlocks[33], p_vecPrecomputedBlocks[31]));
+    p_vecPrecomputedBlocks[47] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[47], 1);
+    p_vecPrecomputedBlocks[48] = XOR(XOR(p_vecPrecomputedBlocks[45], p_vecPrecomputedBlocks[40]), XOR(p_vecPrecomputedBlocks[34], p_vecPrecomputedBlocks[32]));
+    p_vecPrecomputedBlocks[48] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[48], 1);
+    p_vecPrecomputedBlocks[49] = XOR(XOR(p_vecPrecomputedBlocks[46], p_vecPrecomputedBlocks[41]), XOR(p_vecPrecomputedBlocks[35], p_vecPrecomputedBlocks[33]));
+    p_vecPrecomputedBlocks[49] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[49], 1);
+    p_vecPrecomputedBlocks[50] = XOR(XOR(p_vecPrecomputedBlocks[47], p_vecPrecomputedBlocks[42]), XOR(p_vecPrecomputedBlocks[36], p_vecPrecomputedBlocks[34]));
+    p_vecPrecomputedBlocks[50] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[50], 1);
+    p_vecPrecomputedBlocks[51] = XOR(XOR(p_vecPrecomputedBlocks[48], p_vecPrecomputedBlocks[43]), XOR(p_vecPrecomputedBlocks[37], p_vecPrecomputedBlocks[35]));
+    p_vecPrecomputedBlocks[51] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[51], 1);
+    p_vecPrecomputedBlocks[52] = XOR(XOR(p_vecPrecomputedBlocks[49], p_vecPrecomputedBlocks[44]), XOR(p_vecPrecomputedBlocks[38], p_vecPrecomputedBlocks[36]));
+    p_vecPrecomputedBlocks[52] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[52], 1);
+    p_vecPrecomputedBlocks[53] = XOR(XOR(p_vecPrecomputedBlocks[50], p_vecPrecomputedBlocks[45]), XOR(p_vecPrecomputedBlocks[39], p_vecPrecomputedBlocks[37]));
+    p_vecPrecomputedBlocks[53] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[53], 1);
+    p_vecPrecomputedBlocks[54] = XOR(XOR(p_vecPrecomputedBlocks[51], p_vecPrecomputedBlocks[46]), XOR(p_vecPrecomputedBlocks[40], p_vecPrecomputedBlocks[38]));
+    p_vecPrecomputedBlocks[54] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[54], 1);
+    p_vecPrecomputedBlocks[55] = XOR(XOR(p_vecPrecomputedBlocks[52], p_vecPrecomputedBlocks[47]), XOR(p_vecPrecomputedBlocks[41], p_vecPrecomputedBlocks[39]));
+    p_vecPrecomputedBlocks[55] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[55], 1);
+    p_vecPrecomputedBlocks[56] = XOR(XOR(p_vecPrecomputedBlocks[53], p_vecPrecomputedBlocks[48]), XOR(p_vecPrecomputedBlocks[42], p_vecPrecomputedBlocks[40]));
+    p_vecPrecomputedBlocks[56] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[56], 1);
+    p_vecPrecomputedBlocks[57] = XOR(XOR(p_vecPrecomputedBlocks[54], p_vecPrecomputedBlocks[49]), XOR(p_vecPrecomputedBlocks[43], p_vecPrecomputedBlocks[41]));
+    p_vecPrecomputedBlocks[57] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[57], 1);
+    p_vecPrecomputedBlocks[58] = XOR(XOR(p_vecPrecomputedBlocks[55], p_vecPrecomputedBlocks[50]), XOR(p_vecPrecomputedBlocks[44], p_vecPrecomputedBlocks[42]));
+    p_vecPrecomputedBlocks[58] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[58], 1);
+    p_vecPrecomputedBlocks[59] = XOR(XOR(p_vecPrecomputedBlocks[56], p_vecPrecomputedBlocks[51]), XOR(p_vecPrecomputedBlocks[45], p_vecPrecomputedBlocks[43]));
+    p_vecPrecomputedBlocks[59] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[59], 1);
+    p_vecPrecomputedBlocks[60] = XOR(XOR(p_vecPrecomputedBlocks[57], p_vecPrecomputedBlocks[52]), XOR(p_vecPrecomputedBlocks[46], p_vecPrecomputedBlocks[44]));
+    p_vecPrecomputedBlocks[60] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[60], 1);
+    p_vecPrecomputedBlocks[61] = XOR(XOR(p_vecPrecomputedBlocks[58], p_vecPrecomputedBlocks[53]), XOR(p_vecPrecomputedBlocks[47], p_vecPrecomputedBlocks[45]));
+    p_vecPrecomputedBlocks[61] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[61], 1);
+    p_vecPrecomputedBlocks[62] = XOR(XOR(p_vecPrecomputedBlocks[59], p_vecPrecomputedBlocks[54]), XOR(p_vecPrecomputedBlocks[48], p_vecPrecomputedBlocks[46]));
+    p_vecPrecomputedBlocks[62] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[62], 1);
+    p_vecPrecomputedBlocks[63] = XOR(XOR(p_vecPrecomputedBlocks[60], p_vecPrecomputedBlocks[55]), XOR(p_vecPrecomputedBlocks[49], p_vecPrecomputedBlocks[47]));
+    p_vecPrecomputedBlocks[63] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[63], 1);
+    p_vecPrecomputedBlocks[64] = XOR(XOR(p_vecPrecomputedBlocks[61], p_vecPrecomputedBlocks[56]), XOR(p_vecPrecomputedBlocks[50], p_vecPrecomputedBlocks[48]));
+    p_vecPrecomputedBlocks[64] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[64], 1);
+    p_vecPrecomputedBlocks[65] = XOR(XOR(p_vecPrecomputedBlocks[62], p_vecPrecomputedBlocks[57]), XOR(p_vecPrecomputedBlocks[51], p_vecPrecomputedBlocks[49]));
+    p_vecPrecomputedBlocks[65] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[65], 1);
+    p_vecPrecomputedBlocks[66] = XOR(XOR(p_vecPrecomputedBlocks[63], p_vecPrecomputedBlocks[58]), XOR(p_vecPrecomputedBlocks[52], p_vecPrecomputedBlocks[50]));
+    p_vecPrecomputedBlocks[66] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[66], 1);
+    p_vecPrecomputedBlocks[67] = XOR(XOR(p_vecPrecomputedBlocks[64], p_vecPrecomputedBlocks[59]), XOR(p_vecPrecomputedBlocks[53], p_vecPrecomputedBlocks[51]));
+    p_vecPrecomputedBlocks[67] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[67], 1);
+    p_vecPrecomputedBlocks[68] = XOR(XOR(p_vecPrecomputedBlocks[65], p_vecPrecomputedBlocks[60]), XOR(p_vecPrecomputedBlocks[54], p_vecPrecomputedBlocks[52]));
+    p_vecPrecomputedBlocks[68] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[68], 1);
+    p_vecPrecomputedBlocks[69] = XOR(XOR(p_vecPrecomputedBlocks[66], p_vecPrecomputedBlocks[61]), XOR(p_vecPrecomputedBlocks[55], p_vecPrecomputedBlocks[53]));
+    p_vecPrecomputedBlocks[69] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[69], 1);
+    p_vecPrecomputedBlocks[70] = XOR(XOR(p_vecPrecomputedBlocks[67], p_vecPrecomputedBlocks[62]), XOR(p_vecPrecomputedBlocks[56], p_vecPrecomputedBlocks[54]));
+    p_vecPrecomputedBlocks[70] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[70], 1);
+    p_vecPrecomputedBlocks[71] = XOR(XOR(p_vecPrecomputedBlocks[68], p_vecPrecomputedBlocks[63]), XOR(p_vecPrecomputedBlocks[57], p_vecPrecomputedBlocks[55]));
+    p_vecPrecomputedBlocks[71] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[71], 1);
+    p_vecPrecomputedBlocks[72] = XOR(XOR(p_vecPrecomputedBlocks[69], p_vecPrecomputedBlocks[64]), XOR(p_vecPrecomputedBlocks[58], p_vecPrecomputedBlocks[56]));
+    p_vecPrecomputedBlocks[72] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[72], 1);
+    p_vecPrecomputedBlocks[73] = XOR(XOR(p_vecPrecomputedBlocks[70], p_vecPrecomputedBlocks[65]), XOR(p_vecPrecomputedBlocks[59], p_vecPrecomputedBlocks[57]));
+    p_vecPrecomputedBlocks[73] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[73], 1);
+    p_vecPrecomputedBlocks[74] = XOR(XOR(p_vecPrecomputedBlocks[71], p_vecPrecomputedBlocks[66]), XOR(p_vecPrecomputedBlocks[60], p_vecPrecomputedBlocks[58]));
+    p_vecPrecomputedBlocks[74] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[74], 1);
+    p_vecPrecomputedBlocks[75] = XOR(XOR(p_vecPrecomputedBlocks[72], p_vecPrecomputedBlocks[67]), XOR(p_vecPrecomputedBlocks[61], p_vecPrecomputedBlocks[59]));
+    p_vecPrecomputedBlocks[75] = VEC_LEFT_ROTATE(p_vecPrecomputedBlocks[75], 1);
 }
 /**
  * Function: precomputeInnerLoop
  */
 static inline void precomputeInnerLoop
 (
-    __m128i *p_precomputedBlocks,
+    __m128i *p_vecPrecomputedBlocks,
     __m128i *p_w0,
     __m128i *p_blocks
 )
 {
     // rotate w0
-    p_w0[1]  = VEC_LEFT_ROTATE(p_blocks[0],  1);
-    p_w0[2]  = VEC_LEFT_ROTATE(p_blocks[0],  2);
-    p_w0[3]  = VEC_LEFT_ROTATE(p_blocks[0],  3);
-    p_w0[4]  = VEC_LEFT_ROTATE(p_blocks[0],  4);
-    p_w0[5]  = VEC_LEFT_ROTATE(p_blocks[0],  5);
-    p_w0[6]  = VEC_LEFT_ROTATE(p_blocks[0],  6);
-    p_w0[7]  = VEC_LEFT_ROTATE(p_blocks[0],  7);
-    p_w0[8]  = VEC_LEFT_ROTATE(p_blocks[0],  8);
-    p_w0[9]  = VEC_LEFT_ROTATE(p_blocks[0],  9);
+    p_w0[ 1] = VEC_LEFT_ROTATE(p_blocks[0],  1);
+    p_w0[ 2] = VEC_LEFT_ROTATE(p_blocks[0],  2);
+    p_w0[ 3] = VEC_LEFT_ROTATE(p_blocks[0],  3);
+    p_w0[ 4] = VEC_LEFT_ROTATE(p_blocks[0],  4);
+    p_w0[ 5] = VEC_LEFT_ROTATE(p_blocks[0],  5);
+    p_w0[ 6] = VEC_LEFT_ROTATE(p_blocks[0],  6);
+    p_w0[ 7] = VEC_LEFT_ROTATE(p_blocks[0],  7);
+    p_w0[ 8] = VEC_LEFT_ROTATE(p_blocks[0],  8);
+    p_w0[ 9] = VEC_LEFT_ROTATE(p_blocks[0],  9);
     p_w0[10] = VEC_LEFT_ROTATE(p_blocks[0], 10);
     p_w0[11] = VEC_LEFT_ROTATE(p_blocks[0], 11);
     p_w0[12] = VEC_LEFT_ROTATE(p_blocks[0], 12);
@@ -580,66 +511,66 @@ static inline void precomputeInnerLoop
     p_w0[18] = VEC_LEFT_ROTATE(p_blocks[0], 18);
     p_w0[19] = VEC_LEFT_ROTATE(p_blocks[0], 19);
     p_w0[20] = VEC_LEFT_ROTATE(p_blocks[0], 20);
-    // precompute word blocks (basis by Jens Steube)
+    // precompute word blocks for inner loop (basis by Jens Steube)
     // note: slightly optimized for our special case of sha1-cracking
     p_blocks[16] = p_w0[1];
-    p_blocks[17] = p_precomputedBlocks[17];
-    p_blocks[18] = p_precomputedBlocks[18];
+    p_blocks[17] = p_vecPrecomputedBlocks[17];
+    p_blocks[18] = p_vecPrecomputedBlocks[18];
     p_blocks[19] = p_w0[2];
-    p_blocks[20] = p_precomputedBlocks[20];
-    p_blocks[21] = p_precomputedBlocks[21];
+    p_blocks[20] = p_vecPrecomputedBlocks[20];
+    p_blocks[21] = p_vecPrecomputedBlocks[21];
     p_blocks[22] = p_w0[3];
-    p_blocks[23] = p_precomputedBlocks[23];
-    p_blocks[24] = XOR(p_precomputedBlocks[24], p_w0[2]);
-    p_blocks[25] = XOR(p_precomputedBlocks[25], p_w0[4]);
-    p_blocks[26] = p_precomputedBlocks[26];
-    p_blocks[27] = p_precomputedBlocks[27];
-    p_blocks[28] = XOR(p_precomputedBlocks[28], p_w0[5]);
-    p_blocks[29] = p_precomputedBlocks[29];
-    p_blocks[30] = XOR(XOR(p_precomputedBlocks[30], p_w0[4]), p_w0[2]);
-    p_blocks[31] = XOR(p_precomputedBlocks[31], p_w0[6]);
-    p_blocks[32] = XOR(XOR(p_precomputedBlocks[32], p_w0[3]), p_w0[2]);
-    p_blocks[33] = p_precomputedBlocks[33];
-    p_blocks[34] = XOR(p_precomputedBlocks[34], p_w0[7]);
-    p_blocks[35] = XOR(p_precomputedBlocks[35], p_w0[4]);
-    p_blocks[36] = XOR(XOR(p_precomputedBlocks[36], p_w0[6]), p_w0[4]);
-    p_blocks[37] = XOR(p_precomputedBlocks[37], p_w0[8]);
-    p_blocks[38] = XOR(p_precomputedBlocks[38], p_w0[4]);
-    p_blocks[39] = p_precomputedBlocks[39];
-    p_blocks[40] = XOR(XOR(p_precomputedBlocks[40], p_w0[4]), p_w0[9]);
-    p_blocks[41] = p_precomputedBlocks[41];
-    p_blocks[42] = XOR(XOR(p_precomputedBlocks[42], p_w0[6]), p_w0[8]);
-    p_blocks[43] = XOR(p_precomputedBlocks[43], p_w0[10]);
-    p_blocks[44] = XOR(XOR(p_precomputedBlocks[44], p_w0[6]), XOR(p_w0[3], p_w0[7]));
-    p_blocks[45] = p_precomputedBlocks[45];
-    p_blocks[46] = XOR(XOR(p_precomputedBlocks[46], p_w0[4]), p_w0[11]);
-    p_blocks[47] = XOR(XOR(p_precomputedBlocks[47], p_w0[8]), p_w0[4]);
-    p_blocks[48] = XOR(XOR(XOR(p_precomputedBlocks[48], p_w0[8]),  XOR(p_w0[4], p_w0[3])), XOR(p_w0[10], p_w0[5]));
-    p_blocks[49] = XOR(p_precomputedBlocks[49], p_w0[12]);
-    p_blocks[50] = XOR(p_precomputedBlocks[50], p_w0[8]);
-    p_blocks[51] = XOR(XOR(p_precomputedBlocks[51], p_w0[6]), p_w0[4]);
-    p_blocks[52] = XOR(XOR(p_precomputedBlocks[52], p_w0[8]), XOR(p_w0[4], p_w0[13]));
-    p_blocks[53] = p_precomputedBlocks[53];
-    p_blocks[54] = XOR(XOR(p_precomputedBlocks[54], p_w0[7]), XOR(p_w0[10], p_w0[12]));
-    p_blocks[55] = XOR(p_precomputedBlocks[55], p_w0[14]);
-    p_blocks[56] = XOR(XOR(XOR(p_precomputedBlocks[56], p_w0[6]), XOR(p_w0[4], p_w0[11])), XOR(p_w0[7], p_w0[10]));
-    p_blocks[57] = XOR(p_precomputedBlocks[57], p_w0[8]);
-    p_blocks[58] = XOR(XOR(p_precomputedBlocks[58], p_w0[8]), XOR(p_w0[4], p_w0[15]));
-    p_blocks[59] = XOR(XOR(p_precomputedBlocks[59], p_w0[8]), p_w0[12]);
-    p_blocks[60] = XOR(XOR(XOR(p_precomputedBlocks[60], p_w0[8]), XOR(p_w0[4], p_w0[7])), XOR(p_w0[12], p_w0[14]));
-    p_blocks[61] = XOR(p_precomputedBlocks[61], p_w0[16]);
-    p_blocks[62] = XOR(XOR(XOR(p_precomputedBlocks[62], p_w0[6]), XOR(p_w0[12], p_w0[8])), p_w0[4]);
-    p_blocks[63] = XOR(p_precomputedBlocks[63], p_w0[8]);
-    p_blocks[64] = XOR(XOR(XOR(XOR(p_precomputedBlocks[64], p_w0[6]), p_w0[7]), XOR(p_w0[17], p_w0[12])), XOR(p_w0[8], p_w0[4]));
-    p_blocks[65] = p_precomputedBlocks[65];
-    p_blocks[66] = XOR(XOR(p_precomputedBlocks[66], p_w0[14]), p_w0[16]);
-    p_blocks[67] = XOR(XOR(p_precomputedBlocks[67], p_w0[8]), p_w0[18]);
-    p_blocks[68] = XOR(XOR(p_precomputedBlocks[68], p_w0[11]), XOR(p_w0[14], p_w0[15]));
-    p_blocks[69] = p_precomputedBlocks[69];
-    p_blocks[70] = XOR(XOR(p_precomputedBlocks[70], p_w0[12]), p_w0[19]);
-    p_blocks[71] = XOR(XOR(p_precomputedBlocks[71], p_w0[12]), p_w0[16]);
-    p_blocks[72] = XOR(XOR(XOR(XOR(p_precomputedBlocks[72], p_w0[11]), XOR(p_w0[12], p_w0[18])), XOR(p_w0[13], p_w0[16])), p_w0[5]);
-    p_blocks[73] = XOR(p_precomputedBlocks[73], p_w0[20]);
-    p_blocks[74] = XOR(XOR(p_precomputedBlocks[74], p_w0[8]), p_w0[16]);
-    p_blocks[75] = XOR(XOR(p_precomputedBlocks[75], p_w0[6]), XOR(p_w0[12], p_w0[14]));
+    p_blocks[23] = p_vecPrecomputedBlocks[23];
+    p_blocks[24] = XOR(p_vecPrecomputedBlocks[24], p_w0[2]);
+    p_blocks[25] = XOR(p_vecPrecomputedBlocks[25], p_w0[4]);
+    p_blocks[26] = p_vecPrecomputedBlocks[26];
+    p_blocks[27] = p_vecPrecomputedBlocks[27];
+    p_blocks[28] = XOR(p_vecPrecomputedBlocks[28], p_w0[5]);
+    p_blocks[29] = p_vecPrecomputedBlocks[29];
+    p_blocks[30] = XOR(XOR(p_vecPrecomputedBlocks[30], p_w0[4]), p_w0[2]);
+    p_blocks[31] = XOR(p_vecPrecomputedBlocks[31], p_w0[6]);
+    p_blocks[32] = XOR(XOR(p_vecPrecomputedBlocks[32], p_w0[3]), p_w0[2]);
+    p_blocks[33] = p_vecPrecomputedBlocks[33];
+    p_blocks[34] = XOR(p_vecPrecomputedBlocks[34], p_w0[7]);
+    p_blocks[35] = XOR(p_vecPrecomputedBlocks[35], p_w0[4]);
+    p_blocks[36] = XOR(XOR(p_vecPrecomputedBlocks[36], p_w0[6]), p_w0[4]);
+    p_blocks[37] = XOR(p_vecPrecomputedBlocks[37], p_w0[8]);
+    p_blocks[38] = XOR(p_vecPrecomputedBlocks[38], p_w0[4]);
+    p_blocks[39] = p_vecPrecomputedBlocks[39];
+    p_blocks[40] = XOR(XOR(p_vecPrecomputedBlocks[40], p_w0[4]), p_w0[9]);
+    p_blocks[41] = p_vecPrecomputedBlocks[41];
+    p_blocks[42] = XOR(XOR(p_vecPrecomputedBlocks[42], p_w0[6]), p_w0[8]);
+    p_blocks[43] = XOR(p_vecPrecomputedBlocks[43], p_w0[10]);
+    p_blocks[44] = XOR(XOR(p_vecPrecomputedBlocks[44], p_w0[6]), XOR(p_w0[3], p_w0[7]));
+    p_blocks[45] = p_vecPrecomputedBlocks[45];
+    p_blocks[46] = XOR(XOR(p_vecPrecomputedBlocks[46], p_w0[4]), p_w0[11]);
+    p_blocks[47] = XOR(XOR(p_vecPrecomputedBlocks[47], p_w0[8]), p_w0[4]);
+    p_blocks[48] = XOR(XOR(XOR(p_vecPrecomputedBlocks[48], p_w0[8]), XOR(p_w0[4], p_w0[3])), XOR(p_w0[10], p_w0[5]));
+    p_blocks[49] = XOR(p_vecPrecomputedBlocks[49], p_w0[12]);
+    p_blocks[50] = XOR(p_vecPrecomputedBlocks[50], p_w0[8]);
+    p_blocks[51] = XOR(XOR(p_vecPrecomputedBlocks[51], p_w0[6]), p_w0[4]);
+    p_blocks[52] = XOR(XOR(p_vecPrecomputedBlocks[52], p_w0[8]), XOR(p_w0[4], p_w0[13]));
+    p_blocks[53] = p_vecPrecomputedBlocks[53];
+    p_blocks[54] = XOR(XOR(p_vecPrecomputedBlocks[54], p_w0[7]), XOR(p_w0[10], p_w0[12]));
+    p_blocks[55] = XOR(p_vecPrecomputedBlocks[55], p_w0[14]);
+    p_blocks[56] = XOR(XOR(XOR(p_vecPrecomputedBlocks[56], p_w0[6]), XOR(p_w0[4], p_w0[11])), XOR(p_w0[7], p_w0[10]));
+    p_blocks[57] = XOR(p_vecPrecomputedBlocks[57], p_w0[8]);
+    p_blocks[58] = XOR(XOR(p_vecPrecomputedBlocks[58], p_w0[8]), XOR(p_w0[4], p_w0[15]));
+    p_blocks[59] = XOR(XOR(p_vecPrecomputedBlocks[59], p_w0[8]), p_w0[12]);
+    p_blocks[60] = XOR(XOR(XOR(p_vecPrecomputedBlocks[60], p_w0[8]), XOR(p_w0[4], p_w0[7])), XOR(p_w0[12], p_w0[14]));
+    p_blocks[61] = XOR(p_vecPrecomputedBlocks[61], p_w0[16]);
+    p_blocks[62] = XOR(XOR(XOR(p_vecPrecomputedBlocks[62], p_w0[6]), XOR(p_w0[12], p_w0[8])), p_w0[4]);
+    p_blocks[63] = XOR(p_vecPrecomputedBlocks[63], p_w0[8]);
+    p_blocks[64] = XOR(XOR(XOR(XOR(p_vecPrecomputedBlocks[64], p_w0[6]), p_w0[7]), XOR(p_w0[17], p_w0[12])), XOR(p_w0[8], p_w0[4]));
+    p_blocks[65] = p_vecPrecomputedBlocks[65];
+    p_blocks[66] = XOR(XOR(p_vecPrecomputedBlocks[66], p_w0[14]), p_w0[16]);
+    p_blocks[67] = XOR(XOR(p_vecPrecomputedBlocks[67], p_w0[8]), p_w0[18]);
+    p_blocks[68] = XOR(XOR(p_vecPrecomputedBlocks[68], p_w0[11]), XOR(p_w0[14], p_w0[15]));
+    p_blocks[69] = p_vecPrecomputedBlocks[69];
+    p_blocks[70] = XOR(XOR(p_vecPrecomputedBlocks[70], p_w0[12]), p_w0[19]);
+    p_blocks[71] = XOR(XOR(p_vecPrecomputedBlocks[71], p_w0[12]), p_w0[16]);
+    p_blocks[72] = XOR(XOR(XOR(XOR(p_vecPrecomputedBlocks[72], p_w0[11]), XOR(p_w0[12], p_w0[18])), XOR(p_w0[13], p_w0[16])), p_w0[5]);
+    p_blocks[73] = XOR(p_vecPrecomputedBlocks[73], p_w0[20]);
+    p_blocks[74] = XOR(XOR(p_vecPrecomputedBlocks[74], p_w0[8]), p_w0[16]);
+    p_blocks[75] = XOR(XOR(p_vecPrecomputedBlocks[75], p_w0[6]), XOR(p_w0[12], p_w0[14]));
 }
