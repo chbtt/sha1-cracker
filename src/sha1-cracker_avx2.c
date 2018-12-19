@@ -82,8 +82,8 @@
     ROUND_PROCESSING_END(mA, mB, mE, VF_REST(mB, mC, mD), K_60_79, i)
 
 // function prototypes
-static inline void precomputeOuterLoop(__m256i  *p_precomputedBlocks);
-static inline void precomputeInnerLoop(__m256i  *p_precomputedBlocks,
+static inline void precomputeOuterLoop(__m256i  *p_vecPrecomputedBlocks);
+static inline void precomputeInnerLoop(__m256i  *p_vecPrecomputedBlocks,
                                        __m256i  *p_w0,
                                        __m256i  *p_blocks);
 
